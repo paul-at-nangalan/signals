@@ -2,10 +2,10 @@ package signals
 
 import (
 	"fmt"
+	"github.com/paul-at-nangalan/signals/dataplot"
+	"github.com/paul-at-nangalan/signals/managedslice"
 	"gonum.org/v1/gonum/stat"
 	"log"
-	"signals/dataplot"
-	"signals/managedslice"
 	"time"
 )
 

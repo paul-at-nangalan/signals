@@ -1,4 +1,4 @@
-module signals
+module github.com/paul-at-nangalan/signals
 
 go 1.21
 

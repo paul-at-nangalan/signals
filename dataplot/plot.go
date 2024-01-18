@@ -2,9 +2,9 @@ package dataplot
 
 import (
 	"fmt"
+	"github.com/paul-at-nangalan/signals/managedslice"
 	"log"
 	"math"
-	"signals/managedslice"
 )
 
 func PlotManagedSlice(data *managedslice.Slice, vx, vy int) {
