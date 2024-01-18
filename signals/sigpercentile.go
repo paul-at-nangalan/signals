@@ -10,6 +10,10 @@ import (
 	"time"
 )
 
+const (
+	FP_TOLERANCE = 0.0000000000001
+)
+
 type Bin struct {
 	lowerval   float64
 	upperval   float64
@@ -40,7 +44,7 @@ func (p *Bin) Add(val float64) {
 }
 
 func (p *Bin) TryAdd(val float64) bool {
-	if val >= p.lowerval && val <= p.upperval {
+	if val >= (p.lowerval-FP_TOLERANCE) && val <= (p.upperval+FP_TOLERANCE) {
 		p.Add(val)
 		return true
 	}
@@ -71,6 +75,9 @@ type SigPercentile struct {
 }
 
 func NewSigPercentile(buybelow, sellabove float64, mindata int, targetage time.Duration) *SigPercentile {
+	if targetage == 0 {
+		log.Panic("Target age is zero")
+	}
 	//// Don't create any bins until we have an idea of the range
 	return &SigPercentile{
 		buybelow:      buybelow,
@@ -116,6 +123,9 @@ func (p *SigPercentile) predictIndex(val float64) (predicted int, outofbounds fl
 	offset := (val - p.lower) / interval
 	if offset > 0 {
 		offset-- /// just in case we end up right on the upper edge
+	}
+	if math.IsNaN(offset) {
+		log.Panic("Predicted index gives neg offset ", val, p.lower, p.upper, len(p.bins))
 	}
 	return int(offset), 0 /// return the lower expected index - then we can just search up
 }
@@ -220,6 +230,8 @@ func (p *SigPercentile) AddData(val float64) {
 	}
 	/// if we have nothing - create
 	if len(p.bins) == 0 {
+		///set range one more time in case this last dp is an outlier
+		p.SetRange(val)
 		fmt.Println("Creating bins")
 		interval := (p.upper - p.lower) / float64(p.targetnumbins)
 		p.bins = make([]*Bin, p.targetnumbins)
@@ -229,7 +241,7 @@ func (p *SigPercentile) AddData(val float64) {
 		for _, val := range p.lastdata.Items() {
 			predictedindex, outofbounds := p.predictIndex(val.(float64))
 			if outofbounds != 0 {
-				log.Panic("oob is still non zero, ", val, outofbounds)
+				log.Panic("oob is still non zero, ", val, outofbounds, p.lower, p.upper, len(p.bins))
 			}
 			if !p.tryAddFromIndx(val.(float64), predictedindex) {
 				log.Panic("failed to add value from last data ", val, predictedindex, p.lower, p.upper)

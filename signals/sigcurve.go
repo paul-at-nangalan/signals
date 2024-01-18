@@ -95,7 +95,7 @@ func (p *SigCurve) Plot() {
 	/*for _, f := range p.variancecurvedbg.Items() {
 		fmt.Print(f, ",")
 	}*/
-	fmt.Println()
+	fmt.Println("Rsqrd data")
 	dataplot.PlotManagedSlice(p.rsqrd, 80, 40)
 }
 
@@ -105,13 +105,15 @@ func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []in
 	firstsampletime := sampletime[0].(time.Time)
 	y := make([]float64, len(data))
 	x := make([]float64, len(data))
+	timerange := sampletime[len(sampletime)-1].(time.Time).Sub(sampletime[0].(time.Time))
+	avgtime := float64(timerange) / float64(len(sampletime))
 	for i, _ := range data {
-		x[i] = float64(sampletime[i].(time.Time).Sub(firstsampletime)) / float64(time.Millisecond)
+		x[i] = float64(sampletime[i].(time.Time).Sub(firstsampletime)) / avgtime
 		y[i] = data[i].(float64)
 	}
 	alpha, beta = stat.LinearRegression(x, y, nil, false)
 	rsqrd = stat.RSquared(x, y, nil, alpha, beta)
-	p.logdbg("regression ", beta, rsqrd)
+	//p.logdbg("regression ", beta, rsqrd)
 	p.statrsqrddata.Inc(rsqrd)
 	return alpha, beta, rsqrd
 }
@@ -150,11 +152,13 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 	///I need at least 2 windows to start
 	// thereafter, create a record every new window
 	if p.variance.Len() >= p.window && (p.wndcounter%p.window) == 0 {
+		//p.logdbg("getting LR data")
 		_, grad, rsqrd := p.linearRegressionFromArray(p.variance.Items()[p.variance.Len()-(p.window):],
 			p.variancetime.Items()[p.variancetime.Len()-(p.window):])
 		p.rsqrd.PushAndResize(rsqrd)
 		/// don't push dubious results
 		if rsqrd > p.minrsqrd {
+			//p.logdbg("adding LR data ", grad)
 			p.variancecurve.PushAndResize(grad)
 			p.variancecurvedbg.PushAndResize(grad)
 		}
