@@ -158,6 +158,9 @@ func (p *SigPercentile) tryAddFromIndx(val float64, predictedindex int) bool {
 	if math.IsNaN(val) {
 		log.Panic("NaN fed into try Add From Indx")
 	}
+	if predictedindex < 0 {
+		log.Panic("Predicted index is screwed up ", predictedindex)
+	}
 	counter := 0
 	for i := predictedindex; i < len(p.bins); i++ {
 		if p.bins[i].TryAdd(val) {
