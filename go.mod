@@ -3,7 +3,7 @@ module github.com/paul-at-nangalan/signals
 go 1.21
 
 require (
-	github.com/paul-at-nangalan/stats v0.0.0-20210809111921-737cccec4ac7
+	github.com/paul-at-nangalan/stats v0.0.0-20240118083230-1ce1d76ab7cb
 	gonum.org/v1/gonum v0.14.0
 )
 
