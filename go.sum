@@ -1,9 +1,5 @@
-github.com/paul-at-nangalan/stats v0.0.0-20210809111921-737cccec4ac7 h1:3isPhZZuwHfKkKJxhwVt8BrInR/24+A86v6TWLrtdRg=
-github.com/paul-at-nangalan/stats v0.0.0-20210809111921-737cccec4ac7/go.mod h1:eDD7PieVLpzXMY38ZMNj7RF5A/mvA8zvXcDoCW7frFI=
-github.com/paul-at-nangalan/stats v0.0.0-20240118083230-1ce1d76ab7cb h1:xZpvPuRfQum6t3Rsu7VKqRDn5pWdEhfg3n+uSyRD9EE=
-github.com/paul-at-nangalan/stats v0.0.0-20240118083230-1ce1d76ab7cb/go.mod h1:ZL8jxadmnC8Sbebu2dUaju9wQc+oINsA8DFx7eahGUk=
-github.com/paul-at-nangalan/stats v0.0.0-20240118084905-aa1161ca730b h1:EhTdFXROsIatXMTky5SoQaWiB4fABS/UjzsVh9KAuQ8=
-github.com/paul-at-nangalan/stats v0.0.0-20240118084905-aa1161ca730b/go.mod h1:ZL8jxadmnC8Sbebu2dUaju9wQc+oINsA8DFx7eahGUk=
+github.com/paul-at-nangalan/stats v0.0.0-20240118090254-7938b07448a8 h1:P0BJUXTe49IpMlCKY7mYzxUoiRO+VjoRwg+6jrRuiGQ=
+github.com/paul-at-nangalan/stats v0.0.0-20240118090254-7938b07448a8/go.mod h1:ZL8jxadmnC8Sbebu2dUaju9wQc+oINsA8DFx7eahGUk=
 golang.org/x/exp v0.0.0-20230321023759-10a507213a29 h1:ooxPy7fPvB4kwsA2h+iBNHkAbp/4JxTSwCmvdjEYmug=
 golang.org/x/exp v0.0.0-20230321023759-10a507213a29/go.mod h1:CxIveKay+FTh1D0yPZemJVgC/95VzuuOLq5Qi4xnoYc=
 gonum.org/v1/gonum v0.14.0 h1:2NiG67LD1tEH0D7kM+ps2V+fXmsAnpUeec7n8tcr4S0=
