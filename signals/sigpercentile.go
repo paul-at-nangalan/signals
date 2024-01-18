@@ -6,6 +6,7 @@ import (
 	"github.com/paul-at-nangalan/signals/managedslice"
 	"gonum.org/v1/gonum/stat"
 	"log"
+	"math"
 	"time"
 )
 
@@ -201,6 +202,11 @@ func (p *SigPercentile) prune() {
 }
 
 func (p *SigPercentile) AddData(val float64) {
+	if math.IsNaN(val) {
+		/// we can't handle this - so drop it and hope its the only one
+		log.Println("WARNING NaN passed to SigPercentile: AddData")
+		return
+	}
 	p.lastdata.PushAndResize(val)
 	if p.lastdata.Len() < p.mindata {
 		p.SetRange(val)
