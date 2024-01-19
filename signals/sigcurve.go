@@ -65,7 +65,7 @@ func NewSigCurve(numsamples int, mindatapoints int, minslope float64, window int
 		wndcounter:           0,
 		averagewndsize:       ((numsamples - mindatapoints) / window) + 1,
 		minrsqrd:             minrsqrd,
-		statslopedata:        perfstats.NewBucketCounter(-3000, 3000, 100, "slope-stats"),
+		statslopedata:        perfstats.NewBucketCounter(-100, 100, 4, "slope-stats"),
 		statrsqrddata:        perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
 		statsvaliddata:       perfstats.NewCounter("valid-data-sample"),
 	}
