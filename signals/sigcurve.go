@@ -42,6 +42,14 @@ type SigCurve struct {
 	loglevel             int
 }
 
+/*
+*
+numsamples - number of samples to use to keep
+window - how many samples are used to calculat the slope
+mindatapoints - the minimum number of data points before we do anything - 1 datapoint = 1 window of samples
+minslope - what slope do you consider to be a upward/downward trend (and because it's time based, you'll need to experiment with real data)
+minrsqrd - what is the min R squared value to accept as reliable (start with about 0.45)
+*/
 func NewSigCurve(numsamples int, mindatapoints int, minslope float64, window int, minrsqrd float64) *SigCurve {
 	if mindatapoints >= numsamples {
 		log.Panic("Splitpoint must be less than num data samples ", mindatapoints, ">=", numsamples)

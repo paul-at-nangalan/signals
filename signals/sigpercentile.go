@@ -74,6 +74,10 @@ type SigPercentile struct {
 	sigsell bool
 }
 
+/*
+*
+targetage - the ideal age of data to calculate the percentile from - e.g. if you want to use ~1 days worth of data ideally, then set 1d
+*/
 func NewSigPercentile(buybelow, sellabove float64, mindata int, targetage time.Duration) *SigPercentile {
 	if targetage == 0 {
 		log.Panic("Target age is zero")
