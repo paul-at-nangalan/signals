@@ -163,9 +163,14 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 		//p.logdbg("getting LR data")
 		_, grad, rsqrd := p.linearRegressionFromArray(p.variance.Items()[p.variance.Len()-(p.window):],
 			p.variancetime.Items()[p.variancetime.Len()-(p.window):])
-		p.rsqrd.PushAndResize(rsqrd)
+		if !math.IsNaN(rsqrd) {
+			p.rsqrd.PushAndResize(rsqrd)
+		}
 		/// don't push dubious results
 		if rsqrd > p.minrsqrd {
+			if math.IsNaN(grad) {
+				log.Panicln("Grad is NaN ", grad)
+			}
 			//p.logdbg("adding LR data ", grad)
 			p.variancecurve.PushAndResize(grad)
 			p.variancecurvedbg.PushAndResize(grad)
