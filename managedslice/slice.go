@@ -1,8 +1,17 @@
 package managedslice
 
 import (
+	"encoding/gob"
+	"github.com/paul-at-nangalan/errorhandler/handlers"
+	"github.com/paul-at-nangalan/signals/store"
+	"io"
 	"log"
+	"time"
 )
+
+type ItemDecoder interface {
+	Decode(buffer io.Reader) any
+}
 
 type Slice struct {
 	slice      []interface{}
@@ -10,6 +19,47 @@ type Slice struct {
 	maxsize    int
 	maxactual  int
 	actualsize int
+
+	decoder ItemDecoder
+}
+
+func (p *Slice) Decode(buffer io.Reader) {
+	dec := gob.NewDecoder(buffer)
+	err := dec.Decode(&p.maxsize)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&p.maxactual)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&p.actualsize)
+	handlers.PanicOnError(err)
+	slicelen := 0
+	err = dec.Decode(&slicelen)
+	handlers.PanicOnError(err)
+	p.slice = make([]interface{}, slicelen)
+	for i := 0; i < slicelen; i++ {
+		item := p.decoder.Decode(buffer)
+		_, ok := item.(store.Encoder)
+		if !ok {
+			log.Panic("Item returned by ItemDecoder does not implement the store.Encoder interface. This cannot be the same item that was stored ",
+				item)
+		}
+		p.slice[i] = item
+	}
+}
+
+func (p *Slice) Encode(buffer io.Writer) {
+	enc := gob.NewEncoder(buffer)
+	err := enc.Encode(p.maxsize)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.maxactual)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.actualsize)
+	handlers.PanicOnError(err)
+	err = enc.Encode(len(p.slice))
+	handlers.PanicOnError(err)
+
+	for _, val := range p.slice {
+		val.(store.Encoder).Encode(buffer) //// val must be encodable - if not a standard type, then support the gob interface
+	}
 }
 
 const (
@@ -24,6 +74,18 @@ func NewManagedSlice(size int, maxsize int) *Slice {
 	ms.actualsize = size
 	ms.maxactual = maxsize * MULTIPLIER
 	return ms
+}
+
+func NewManagedSliceFromStore(storename string, fs store.Store, itemdecoder ItemDecoder, maxage time.Duration) (ms *Slice, isvalid bool) {
+	ms = &Slice{
+		decoder: itemdecoder,
+	}
+	isvalid = fs.Retrieve(storename, maxage, ms)
+	return ms, isvalid
+}
+
+func (p *Slice) Store(storename string, fs store.Store) {
+	fs.Store(storename, p)
 }
 
 func (p *Slice) Set(index int, item interface{}) {

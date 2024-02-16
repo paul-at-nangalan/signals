@@ -33,6 +33,7 @@ type SigCurve struct {
 	averagewndsize int
 	mindatapoints  int
 	minrsqrd       float64 /// exclude very random data
+	shiftfactor    float64
 
 	statsvariancebuysig  *perfstats.Counter
 	statsvariancesellsig *perfstats.Counter
@@ -51,6 +52,11 @@ minslope - what slope do you consider to be a upward/downward trend (and because
 minrsqrd - what is the min R squared value to accept as reliable (start with about 0.45)
 */
 func NewSigCurve(numsamples int, mindatapoints int, minslope float64, window int, minrsqrd float64) *SigCurve {
+	return NewSigCurveWithFactor(numsamples, mindatapoints, minslope, window, minrsqrd, 1)
+}
+#### save the data so we can quickly restart
+func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, window int, minrsqrd float64,
+	shiftfactor float64) *SigCurve {
 	if mindatapoints >= numsamples {
 		log.Panic("Splitpoint must be less than num data samples ", mindatapoints, ">=", numsamples)
 	}
@@ -64,11 +70,12 @@ func NewSigCurve(numsamples int, mindatapoints int, minslope float64, window int
 		variancecurve:        managedslice.NewManagedSlice(0, (numsamples/window)+1), ///we need numsamples / window
 		variancecurvedbg:     managedslice.NewManagedSlice(0, numsamples),            /// for printing
 		rsqrd:                managedslice.NewManagedSlice(0, numsamples),            /// for printing
-		mindatapoints:        (mindatapoints / window) + 1,                           /// divde by the window to get it in block averages
+		shiftfactor:          shiftfactor,
+		mindatapoints:        (mindatapoints / window) + 1, /// divde by the window to get it in block averages
 		numorderbooksamples:  numsamples,
 		minslope:             minslope,
 		statsvariancebuysig:  perfstats.NewCounter("variance-buy-signalled"),
-		statsvariancesellsig: perfstats.NewCounter("variance-buy-signalled"),
+		statsvariancesellsig: perfstats.NewCounter("variance-sell-signalled"),
 		window:               window,
 		wndcounter:           0,
 		averagewndsize:       ((numsamples - mindatapoints) / window) + 1,
@@ -150,7 +157,7 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 }
 
 func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
-	p.variance.PushAndResize(variance)
+	p.variance.PushAndResize(variance * p.shiftfactor)
 	p.variancetime.PushAndResize(t)
 	///Check the variance graph to see if we are on the way up
 	p.wndcounter++
@@ -171,7 +178,8 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 			if math.IsNaN(grad) {
 				log.Panicln("Grad is NaN ", grad)
 			}
-			//p.logdbg("adding LR data ", grad)
+			#### convert a relative gradient based on previous grads
+			//fmt.Println("adding LR data ", grad)
 			p.variancecurve.PushAndResize(grad)
 			p.variancecurvedbg.PushAndResize(grad)
 		}

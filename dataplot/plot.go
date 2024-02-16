@@ -33,6 +33,10 @@ func Plot(vals []float64, vx, vy int) {
 		fmt.Println("Cannot print data points, all are zero")
 		return
 	}
+	if min == max {
+		fmt.Println("Cannot print data points - no gap")
+		return
+	}
 	yaxis := make([]string, vy)
 	intrvl := (max - min) / float64(vy)
 	for i := 0; i < vy; i++ {

@@ -216,7 +216,11 @@ func (p *SigPercentile) prune() {
 		p.upper = p.bins[len(p.bins)-1].upperval
 	}
 	if countlower > 0 {
-		p.bins = p.bins[countlower:]
+		### test this - make sure the UT hits this
+		///Do a memory swap to avoid loosing memory of the bottom (effectively a memory leak)
+		newbins := make([]*Bin, len(p.bins)-countlower)
+		copy(newbins, p.bins[countlower:])
+		p.bins = newbins
 		p.lower = p.bins[0].lowerval
 	}
 }

@@ -1,9 +1,15 @@
 package managedslice
 
 import (
+	"encoding/gob"
 	"fmt"
+	"github.com/paul-at-nangalan/errorhandler/handlers"
+	"github.com/paul-at-nangalan/signals/store"
+	"gotest.tools/v3/assert"
+	"io"
 	"runtime"
 	"testing"
+	"time"
 )
 
 func test(s *Slice, expect []int, t *testing.T) {
@@ -98,4 +104,52 @@ func Test_FromBack(t *testing.T) {
 		t.Error("Mismatch value exp 9 ", back)
 	}
 
+}
+
+type TestEncDec struct {
+	val float64
+	x   float64
+}
+
+func (t *TestEncDec) Encode(buffer io.Writer) {
+	enc := gob.NewEncoder(buffer)
+	err := enc.Encode(t.val)
+	handlers.PanicOnError(err)
+	err = enc.Encode(t.x)
+	handlers.PanicOnError(err)
+}
+
+func (*TestEncDec) Decode(buffer io.Reader) any {
+	t := &TestEncDec{}
+	dec := gob.NewDecoder(buffer)
+	err := dec.Decode(&t.val)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&t.x)
+	handlers.PanicOnError(err)
+	return t
+}
+
+func Test_SliceEncodeDecode(t *testing.T) {
+	ms := NewManagedSlice(0, 20)
+	testdata := make([]TestEncDec, 100)
+	for i := range testdata {
+		testdata[i].x = float64(i) * 0.1
+		testdata[i].val = float64(i) * 0.2
+		ms.PushAndResize(&testdata[i])
+	}
+	fs := store.NewFileStore("/tmp/teststore/")
+	ms.Store("test-managed-slice", fs)
+	time.Sleep(5 * time.Second)
+
+	testdec := &TestEncDec{}
+	restored, isvalid := NewManagedSliceFromStore("test-managed-slice", fs, testdec, time.Hour)
+	assert.Equal(t, isvalid, true, "Data is marked invalid")
+	////restored should contain the last 20 entries
+	assert.Equal(t, restored.Len(), 20, "Mismatch length")
+	expdata := testdata[80:]
+	for i, data := range expdata {
+		retrieved := restored.At(i)
+		assert.Equal(t, retrieved.(TestEncDec).x, data.x, "Mismatch on data at ", i)
+		assert.Equal(t, retrieved.(TestEncDec).val, data.val, "Mismatch on data at ", i)
+	}
 }
