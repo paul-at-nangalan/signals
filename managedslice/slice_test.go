@@ -6,7 +6,6 @@ import (
 	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/store"
 	"gotest.tools/v3/assert"
-	"io"
 	"runtime"
 	"testing"
 	"time"
@@ -111,17 +110,15 @@ type TestEncDec struct {
 	x   float64
 }
 
-func (t *TestEncDec) Encode(buffer io.Writer) {
-	enc := gob.NewEncoder(buffer)
+func (t *TestEncDec) Encode(enc *gob.Encoder) {
 	err := enc.Encode(t.val)
 	handlers.PanicOnError(err)
 	err = enc.Encode(t.x)
 	handlers.PanicOnError(err)
 }
 
-func (*TestEncDec) Decode(buffer io.Reader) any {
+func (*TestEncDec) Decode(dec *gob.Decoder) any {
 	t := &TestEncDec{}
-	dec := gob.NewDecoder(buffer)
 	err := dec.Decode(&t.val)
 	handlers.PanicOnError(err)
 	err = dec.Decode(&t.x)
@@ -149,7 +146,7 @@ func Test_SliceEncodeDecode(t *testing.T) {
 	expdata := testdata[80:]
 	for i, data := range expdata {
 		retrieved := restored.At(i)
-		assert.Equal(t, retrieved.(TestEncDec).x, data.x, "Mismatch on data at ", i)
-		assert.Equal(t, retrieved.(TestEncDec).val, data.val, "Mismatch on data at ", i)
+		assert.Equal(t, retrieved.(*TestEncDec).x, data.x, "Mismatch on data at ", i)
+		assert.Equal(t, retrieved.(*TestEncDec).val, data.val, "Mismatch on data at ", i)
 	}
 }

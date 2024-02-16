@@ -2,6 +2,7 @@ package managedslice
 
 import (
 	"encoding/gob"
+	"fmt"
 	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/store"
 	"io"
@@ -9,8 +10,9 @@ import (
 	"time"
 )
 
-type ItemDecoder interface {
-	Decode(buffer io.Reader) any
+type ItemCoder interface {
+	Decode(buffer *gob.Decoder) any
+	Encode(buffer *gob.Encoder)
 }
 
 type Slice struct {
@@ -20,7 +22,7 @@ type Slice struct {
 	maxactual  int
 	actualsize int
 
-	decoder ItemDecoder
+	decoder ItemCoder
 }
 
 func (p *Slice) Decode(buffer io.Reader) {
@@ -31,15 +33,17 @@ func (p *Slice) Decode(buffer io.Reader) {
 	handlers.PanicOnError(err)
 	err = dec.Decode(&p.actualsize)
 	handlers.PanicOnError(err)
-	slicelen := 0
+	slicelen := int(0)
 	err = dec.Decode(&slicelen)
 	handlers.PanicOnError(err)
 	p.slice = make([]interface{}, slicelen)
+	fmt.Println("Decode slice len ", slicelen)
 	for i := 0; i < slicelen; i++ {
-		item := p.decoder.Decode(buffer)
-		_, ok := item.(store.Encoder)
+		item := p.decoder.Decode(dec)
+		//fmt.Println("Decoded ", item)
+		_, ok := item.(ItemCoder)
 		if !ok {
-			log.Panic("Item returned by ItemDecoder does not implement the store.Encoder interface. This cannot be the same item that was stored ",
+			log.Panic("Item returned by ItemCoder does not implement the store.Encoder interface. This cannot be the same item that was stored ",
 				item)
 		}
 		p.slice[i] = item
@@ -56,9 +60,9 @@ func (p *Slice) Encode(buffer io.Writer) {
 	handlers.PanicOnError(err)
 	err = enc.Encode(len(p.slice))
 	handlers.PanicOnError(err)
-
+	//fmt.Println("Encode slice len ", len(p.slice))
 	for _, val := range p.slice {
-		val.(store.Encoder).Encode(buffer) //// val must be encodable - if not a standard type, then support the gob interface
+		val.(ItemCoder).Encode(enc) //// val must be encodable - if not a standard type, then support the gob interface
 	}
 }
 
@@ -76,7 +80,7 @@ func NewManagedSlice(size int, maxsize int) *Slice {
 	return ms
 }
 
-func NewManagedSliceFromStore(storename string, fs store.Store, itemdecoder ItemDecoder, maxage time.Duration) (ms *Slice, isvalid bool) {
+func NewManagedSliceFromStore(storename string, fs store.Store, itemdecoder ItemCoder, maxage time.Duration) (ms *Slice, isvalid bool) {
 	ms = &Slice{
 		decoder: itemdecoder,
 	}
