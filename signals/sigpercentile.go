@@ -1,10 +1,15 @@
 package signals
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
+	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/dataplot"
 	"github.com/paul-at-nangalan/signals/managedslice"
+	"github.com/paul-at-nangalan/signals/store"
 	"gonum.org/v1/gonum/stat"
+	"io"
 	"log"
 	"math"
 	"time"
@@ -29,6 +34,28 @@ func NewBin(start, interval, offest float64) *Bin {
 		count:      0,
 		lastupdate: time.Now(),
 	}
+}
+
+func (p *Bin) encode(enc *gob.Encoder) {
+	err := enc.Encode(p.lowerval)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.upperval)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.count)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.lastupdate)
+	handlers.PanicOnError(err)
+}
+
+func (p *Bin) decode(dec *gob.Decoder) {
+	err := dec.Decode(&p.lowerval)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&p.upperval)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&p.count)
+	handlers.PanicOnError(err)
+	err = dec.Decode(&p.lastupdate)
+	handlers.PanicOnError(err)
 }
 
 func (p *Bin) MidValue() float64 {
@@ -72,6 +99,11 @@ type SigPercentile struct {
 
 	sigbuy  bool
 	sigsell bool
+
+	datastore    store.Store
+	storagename  string
+	saveduration time.Duration
+	lastsaved    time.Time
 }
 
 /*
@@ -94,6 +126,97 @@ func NewSigPercentile(buybelow, sellabove float64, mindata int, targetage time.D
 		lastdata:  managedslice.NewManagedSlice(0, 2*mindata),
 		targetage: targetage,
 	}
+}
+
+// /Optionally, try to load data from a store - make sure the name is unique
+// / potentially slightly wasteful in terms of memory - but it should get cleaned up
+func LoadFromStorageSigPC(storename string, fs store.Store, maxage time.Duration) (sigpc *SigPercentile, isvalid bool) {
+	sigpc = &SigPercentile{ /// create an empty one and try to load data into it
+		storagename: storename,
+		datastore:   fs,
+	}
+	isvalid = sigpc.retrieveData(maxage)
+	if !isvalid {
+		return nil, false /// let it know the load failed - it maybe considered an error condition
+	}
+	return sigpc, true
+}
+
+func (p *SigPercentile) Encode(buffer io.Writer) {
+	params := &bytes.Buffer{}
+	enc := gob.NewEncoder(params)
+	err := enc.Encode(p.buybelow)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.sellabove)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.mindata)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.targetnumbins)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.pruneabove)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.targetage)
+	handlers.PanicOnError(err)
+
+	////Encode the bins
+	lenbins := len(p.bins)
+	err = enc.Encode(lenbins)
+	handlers.PanicOnError(err)
+	for _, bin := range p.bins {
+		bin.encode(enc)
+	}
+
+	buffer.Write(params.Bytes())
+}
+
+func (p *SigPercentile) Decode(buffer io.Reader) {
+	enc := gob.NewDecoder(buffer)
+	err := enc.Decode(&p.buybelow)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.sellabove)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.mindata)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.targetnumbins)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.targetage)
+	handlers.PanicOnError(err)
+
+	lenbins := 0
+	err = enc.Decode(&lenbins)
+	handlers.PanicOnError(err)
+	p.bins = make([]*Bin, lenbins)
+	for i := range p.bins {
+		p.bins[i].decode(enc)
+	}
+}
+
+func (p *SigPercentile) storeData() {
+	if p.datastore == nil || p.lastsaved.Add(p.saveduration).After(time.Now()) {
+		return
+	}
+	p.datastore.Store(p.storagename+"-lastdata", p.lastdata)
+
+	p.datastore.Store(p.storagename, p)
+}
+
+func (p *SigPercentile) retrieveData(maxage time.Duration) (isvalid bool) {
+	floatdecoder := StorableFloat(0)
+	//timedecoder := StorableTime{}
+	p.lastdata, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-lastdata", p.datastore, floatdecoder, maxage)
+	if !isvalid {
+		return false
+	}
+	p.datastore.Retrieve(p.storagename, maxage, p)
+	return true
+}
+
+// // This just sets up the storage - it won't save it
+func (p *SigPercentile) SetupStorage(storename string, fs store.Store, howoftentosave time.Duration) {
+	p.storagename = storename
+	p.datastore = fs
+	p.saveduration = howoftentosave
+	//// next time a stat comes in, we should save to storage
 }
 
 func (p *SigPercentile) Plot() {
@@ -216,7 +339,6 @@ func (p *SigPercentile) prune() {
 		p.upper = p.bins[len(p.bins)-1].upperval
 	}
 	if countlower > 0 {
-		### test this - make sure the UT hits this
 		///Do a memory swap to avoid loosing memory of the bottom (effectively a memory leak)
 		newbins := make([]*Bin, len(p.bins)-countlower)
 		copy(newbins, p.bins[countlower:])
@@ -226,12 +348,13 @@ func (p *SigPercentile) prune() {
 }
 
 func (p *SigPercentile) AddData(val float64) {
+	p.storeData()
 	if math.IsNaN(val) {
 		/// we can't handle this - so drop it and hope its the only one
 		log.Println("WARNING NaN passed to SigPercentile: AddData")
 		return
 	}
-	p.lastdata.PushAndResize(val)
+	p.lastdata.PushAndResize(StorableFloat(val))
 	if p.lastdata.Len() < p.mindata {
 		p.SetRange(val)
 		return

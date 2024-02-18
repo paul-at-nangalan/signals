@@ -2,6 +2,8 @@ package signals
 
 import (
 	"fmt"
+	"github.com/paul-at-nangalan/signals/store"
+	"gotest.tools/v3/assert"
 	"math"
 	"math/rand"
 	"testing"
@@ -16,7 +18,7 @@ func TestOrderBookVariance_AddVarianceSample(t *testing.T) {
 	numsamples := 1000
 	split := 900
 	window := 10
-	minslope := 100.0
+	minslope := 0.35
 	minrsqrd := 0.45
 	obv := NewSigCurve(numsamples, split, minslope, window, minrsqrd)
 	obv.loglevel = LOGDBG
@@ -108,4 +110,49 @@ func TestOrderBookVariance_AddVarianceSample(t *testing.T) {
 		vals = append(vals, value)
 	}
 	obv.Plot()
+}
+
+func Test_StoreAndRetrieve(t *testing.T) {
+	numsamples := 1000
+	split := 900
+	window := 10
+	minslope := 0.35
+	minrsqrd := 0.45
+	obv := NewSigCurve(numsamples, split, minslope, window, minrsqrd)
+	obv.loglevel = LOGDBG
+	extra := 5
+
+	datastore := store.NewFileStore("/tmp/test-curve")
+	obv.SetupStorage("test-curve", datastore, time.Millisecond)
+
+	lastrad := float64(0)
+	startvalue := float64(1322) /// any number
+	for i := 0; i < numsamples+extra; i++ {
+		rad := (float64(i)/float64(numsamples))*(math.Pi/2) +
+			((float64(i) / float64(numsamples)) * (math.Pi * ((float64(numsamples) - float64(split)) / float64(numsamples))))
+		value := math.Sin(rad) * startvalue
+		obv.AddVarianceSample(value, time.Now())
+		/// this should never trigger a buy signal
+		if obv.SigBuy() {
+			t.Error("Buy signalled for a downturn")
+		}
+		lastrad = rad
+	}
+	obv.Plot()
+	//for _, f := range obv.variancecurvedbg.Items() {
+	//	fmt.Print(f, ", ")
+	//}
+	fmt.Println()
+	if !obv.SigSell() {
+		t.Error("Failed to signal sell on downturn")
+	}
+	/// make sure it done a save of the last data
+	obv.storeData()
+	//// Load it back from stored data
+	sig, isvalid := LoadFromStorage("test-curve", datastore, time.Hour)
+	assert.Equal(t, isvalid, true, "SigCurve invalid after reload")
+	/// add one more value to trigger the sig sell
+	sig.AddVarianceSample(lastrad, time.Now())
+	sig.Plot()
+	assert.Equal(t, sig.SigSell(), true, "Mismatch - expected sig sell to be signalled after reload")
 }

@@ -1,7 +1,9 @@
 package signals
 
 import (
+	"github.com/paul-at-nangalan/signals/store"
 	"gonum.org/v1/gonum/stat/distuv"
+	"gotest.tools/v3/assert"
 	"testing"
 	"time"
 )
@@ -114,4 +116,26 @@ func TestSigPercentile_prune(t *testing.T) {
 			t.Error("Prune failed to clear out upper ranges ", bin)
 		}
 	}
+}
+
+func Test_StoreAndRestore(t *testing.T) {
+	lower := 100.0
+	upper := 200.0
+	sig := NewSigPercentile(0.25, 0.75, 1000, 2*time.Second)
+	fs := store.NewFileStore("/tmp/test-percentile")
+	sig.SetupStorage("sig-percentile", fs, time.Millisecond)
+	fillSig(sig, 3000, lower, upper)
+	checkPC(sig, 120, 0, 0.25, t)
+	checkPC(sig, 150, 0.25, 0.75, t) /// it seems we can't make this too tight
+	checkPC(sig, 175, 0.75, 1.0, t)
+	time.Sleep(2 * time.Second) ///make sure it's had time to save
+	///add one more data point
+	sig.AddData((upper - lower) / 2) ///this should force a save
+
+	loaded, isvalid := LoadFromStorageSigPC("sig-percentile", fs, time.Hour)
+	assert.Equal(t, isvalid, true, "Failed to load sig percentile from storage ")
+	checkPC(loaded, 120, 0, 0.25, t)
+	checkPC(loaded, 150, 0.25, 0.75, t) /// it seems we can't make this too tight
+	checkPC(loaded, 175, 0.75, 1.0, t)
+
 }

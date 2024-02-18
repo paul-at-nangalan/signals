@@ -1,11 +1,16 @@
 package signals
 
 import (
+	"bytes"
+	"encoding/gob"
 	"fmt"
+	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/dataplot"
 	"github.com/paul-at-nangalan/signals/managedslice"
+	"github.com/paul-at-nangalan/signals/store"
 	perfstats "github.com/paul-at-nangalan/stats/stats"
 	"gonum.org/v1/gonum/stat"
+	"io"
 	"log"
 	"math"
 	"time"
@@ -41,6 +46,11 @@ type SigCurve struct {
 	statslopedata        *perfstats.BucketCounter
 	statrsqrddata        *perfstats.BucketCounter
 	loglevel             int
+
+	datastore    store.Store
+	storagename  string
+	saveduration time.Duration
+	lastsaved    time.Time
 }
 
 /*
@@ -50,11 +60,15 @@ window - how many samples are used to calculat the slope
 mindatapoints - the minimum number of data points before we do anything - 1 datapoint = 1 window of samples
 minslope - what slope do you consider to be a upward/downward trend (and because it's time based, you'll need to experiment with real data)
 minrsqrd - what is the min R squared value to accept as reliable (start with about 0.45)
+
+To load/store from stored data use Restore - this is intended to be used after a restart so that it doesn't have to rebuild
+all stats from nothing if there was a failure - it mainly is aimed at being able to do a simple restart on connection failure, where all the
+subscriptions etc can make it difficult to do a reconnect
 */
 func NewSigCurve(numsamples int, mindatapoints int, minslope float64, window int, minrsqrd float64) *SigCurve {
 	return NewSigCurveWithFactor(numsamples, mindatapoints, minslope, window, minrsqrd, 1)
 }
-#### save the data so we can quickly restart
+
 func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, window int, minrsqrd float64,
 	shiftfactor float64) *SigCurve {
 	if mindatapoints >= numsamples {
@@ -64,7 +78,7 @@ func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, 
 		log.Panic("The window should be much smaller than the difference between the number of samples and the mindatapoints")
 	}
 
-	return &SigCurve{
+	sc := &SigCurve{
 		variance:             managedslice.NewManagedSlice(0, numsamples),            ///we only need 2 * window here - but keep the rest for now for debug
 		variancetime:         managedslice.NewManagedSlice(0, numsamples),            ///do LR against time on the x axis
 		variancecurve:        managedslice.NewManagedSlice(0, (numsamples/window)+1), ///we need numsamples / window
@@ -84,6 +98,120 @@ func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, 
 		statrsqrddata:        perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
 		statsvaliddata:       perfstats.NewCounter("valid-data-sample"),
 	}
+	return sc
+}
+
+func (p *SigCurve) Encode(buffer io.Writer) {
+	params := &bytes.Buffer{}
+	enc := gob.NewEncoder(params)
+	err := enc.Encode(p.numorderbooksamples)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.minslope)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.window)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.wndcounter)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.averagewndsize)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.mindatapoints)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.minrsqrd) /// exclude very random data
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.shiftfactor)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.saveduration)
+	handlers.PanicOnError(err)
+
+	buffer.Write(params.Bytes())
+}
+
+func (p *SigCurve) Decode(buffer io.Reader) {
+	enc := gob.NewDecoder(buffer)
+	err := enc.Decode(&p.numorderbooksamples)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.minslope)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.window)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.wndcounter)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.averagewndsize)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.mindatapoints)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.minrsqrd) /// exclude very random data
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.shiftfactor)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.saveduration)
+	handlers.PanicOnError(err)
+}
+
+func (p *SigCurve) storeData() {
+	if p.datastore == nil || p.lastsaved.Add(p.saveduration).After(time.Now()) {
+		return
+	}
+	p.datastore.Store(p.storagename+"-variance", p.variance)
+	p.datastore.Store(p.storagename+"-variancetime", p.variancetime)
+	p.datastore.Store(p.storagename+"-variancecurve", p.variancecurve)
+	p.datastore.Store(p.storagename+"-rsqrd", p.rsqrd)
+	p.datastore.Store(p.storagename, p)
+}
+
+func (p *SigCurve) retrieveData(maxage time.Duration) (isvalid bool) {
+	floatdecoder := StorableFloat(0)
+	timedecoder := StorableTime{}
+	p.variance, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variance", p.datastore, floatdecoder, maxage)
+	if !isvalid {
+		return false
+	}
+	p.variancetime, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variancetime", p.datastore, timedecoder, maxage)
+	if !isvalid {
+		return false
+	}
+	p.variancecurve, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variancecurve", p.datastore, floatdecoder, maxage)
+	if !isvalid {
+		return false
+	}
+	p.rsqrd, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-rsqrd", p.datastore, floatdecoder, maxage)
+	isvalid = p.datastore.Retrieve(p.storagename+"-rsqrd", maxage, p.rsqrd)
+	if !isvalid {
+		return false
+	}
+	isvalid = p.datastore.Retrieve(p.storagename, maxage, p)
+	if !isvalid {
+		return false
+	}
+	return true
+}
+
+// // This just sets up the storage - it won't save it
+func (p *SigCurve) SetupStorage(storename string, fs store.Store, howoftentosave time.Duration) {
+	p.storagename = storename
+	p.datastore = fs
+	p.saveduration = howoftentosave
+	//// next time a stat comes in, we should save to storage
+}
+
+// /Optionally, try to load data from a store - make sure the name is unique
+// / potentially slightly wasteful in terms of memory - but it should get cleaned up
+func LoadFromStorage(storename string, fs store.Store, maxage time.Duration) (sigcurve *SigCurve, isvalid bool) {
+	sigcurve = &SigCurve{ /// create an empty one and try to load data into it
+		storagename:          storename,
+		datastore:            fs,
+		statsvariancebuysig:  perfstats.NewCounter("variance-buy-signalled"),
+		statsvariancesellsig: perfstats.NewCounter("variance-sell-signalled"),
+		wndcounter:           0,
+		statslopedata:        perfstats.NewBucketCounter(-100, 100, 4, "slope-stats"),
+		statrsqrddata:        perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
+		statsvaliddata:       perfstats.NewCounter("valid-data-sample"),
+	}
+	isvalid = sigcurve.retrieveData(maxage)
+	if !isvalid {
+		return nil, false /// let it know the load failed - it maybe considered an error condition
+	}
+	return sigcurve, true
 }
 
 func (p *SigCurve) LogLevel(level int) {
@@ -136,17 +264,27 @@ func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []in
 func (p *SigCurve) trend() (isvalid, upwards bool) {
 	/// provided we have more than
 	if p.variancecurve.Len() >= p.mindatapoints {
+		min := p.variancecurve.At(0).(float64)
+		max := p.variancecurve.At(0).(float64)
+		for _, f := range p.variancecurve.Items() {
+			if f.(float64) > max {
+				max = f.(float64)
+			}
+			if f.(float64) < min {
+				min = f.(float64)
+			}
+		}
+		angle := p.variancecurve.FromBack(0).(float64)
+		//// Scale the angle based on min and max angle
+		scaled := (angle - min) / (max - min)
+		p.statslopedata.Inc(scaled)
 		//see if the last item is a non-shallow upward curve
-		if p.variancecurve.FromBack(0).(float64) > 0 {
-			angle := p.variancecurve.FromBack(0).(float64)
-			p.statslopedata.Inc(angle)
-			if angle > p.minslope {
+		if scaled > 0 {
+			if scaled > p.minslope {
 				return true, true
 			}
-		} else if p.variancecurve.FromBack(0).(float64) < 0 {
-			angle := p.variancecurve.FromBack(0).(float64)
-			p.statslopedata.Inc(angle)
-			if math.Abs(angle) > p.minslope {
+		} else if scaled < 0 {
+			if math.Abs(scaled) > p.minslope {
 				return true, false
 			}
 		}
@@ -157,8 +295,9 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 }
 
 func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
-	p.variance.PushAndResize(variance * p.shiftfactor)
-	p.variancetime.PushAndResize(t)
+	p.storeData() /// this should only store data after a given duration
+	p.variance.PushAndResize(StorableFloat(variance * p.shiftfactor))
+	p.variancetime.PushAndResize(StorableTime(t))
 	///Check the variance graph to see if we are on the way up
 	p.wndcounter++
 	if p.wndcounter > p.window {
@@ -171,17 +310,16 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 		_, grad, rsqrd := p.linearRegressionFromArray(p.variance.Items()[p.variance.Len()-(p.window):],
 			p.variancetime.Items()[p.variancetime.Len()-(p.window):])
 		if !math.IsNaN(rsqrd) {
-			p.rsqrd.PushAndResize(rsqrd)
+			p.rsqrd.PushAndResize(StorableFloat(rsqrd))
 		}
 		/// don't push dubious results
 		if rsqrd > p.minrsqrd {
 			if math.IsNaN(grad) {
 				log.Panicln("Grad is NaN ", grad)
 			}
-			#### convert a relative gradient based on previous grads
 			//fmt.Println("adding LR data ", grad)
-			p.variancecurve.PushAndResize(grad)
-			p.variancecurvedbg.PushAndResize(grad)
+			p.variancecurve.PushAndResize(StorableFloat(grad))
+			p.variancecurvedbg.PushAndResize(StorableFloat(grad))
 		}
 		p.wndcounter = 0
 	} else {
