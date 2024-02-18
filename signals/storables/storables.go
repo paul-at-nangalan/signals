@@ -1,4 +1,4 @@
-package signals
+package storables
 
 import (
 	"encoding/gob"
@@ -16,7 +16,7 @@ func (StorableFloat) Decode(buffer *gob.Decoder) any {
 }
 
 func (f StorableFloat) Encode(buffer *gob.Encoder) {
-	err := buffer.Encode(f)
+	err := buffer.Encode(float64(f))
 	handlers.PanicOnError(err)
 }
 
@@ -30,6 +30,6 @@ func (StorableTime) Decode(buffer *gob.Decoder) any {
 }
 
 func (f StorableTime) Encode(buffer *gob.Encoder) {
-	err := buffer.Encode(f)
+	err := buffer.Encode(time.Time(f))
 	handlers.PanicOnError(err)
 }

@@ -151,8 +151,12 @@ func Test_StoreAndRetrieve(t *testing.T) {
 	//// Load it back from stored data
 	sig, isvalid := LoadFromStorage("test-curve", datastore, time.Hour)
 	assert.Equal(t, isvalid, true, "SigCurve invalid after reload")
+	assert.Equal(t, sig.variancecurve.Len(), obv.variancecurve.Len(), "Mismatch variance curve len")
 	/// add one more value to trigger the sig sell
 	sig.AddVarianceSample(lastrad, time.Now())
 	sig.Plot()
-	assert.Equal(t, sig.SigSell(), true, "Mismatch - expected sig sell to be signalled after reload")
+
+	isvalid, trend := sig.trend()
+	assert.Equal(t, trend, false, "Mismatch - expected sig sell to be signalled after reload")
+	assert.Equal(t, isvalid, true, "Mismatch - expected sig to be valid after reload")
 }

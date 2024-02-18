@@ -7,6 +7,7 @@ import (
 	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/dataplot"
 	"github.com/paul-at-nangalan/signals/managedslice"
+	"github.com/paul-at-nangalan/signals/signals/storables"
 	"github.com/paul-at-nangalan/signals/store"
 	perfstats "github.com/paul-at-nangalan/stats/stats"
 	"gonum.org/v1/gonum/stat"
@@ -155,13 +156,14 @@ func (p *SigCurve) storeData() {
 	p.datastore.Store(p.storagename+"-variance", p.variance)
 	p.datastore.Store(p.storagename+"-variancetime", p.variancetime)
 	p.datastore.Store(p.storagename+"-variancecurve", p.variancecurve)
+	p.datastore.Store(p.storagename+"-variancecurvedbg", p.variancecurvedbg)
 	p.datastore.Store(p.storagename+"-rsqrd", p.rsqrd)
 	p.datastore.Store(p.storagename, p)
 }
 
 func (p *SigCurve) retrieveData(maxage time.Duration) (isvalid bool) {
-	floatdecoder := StorableFloat(0)
-	timedecoder := StorableTime{}
+	floatdecoder := storables.StorableFloat(0)
+	timedecoder := storables.StorableTime{}
 	p.variance, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variance", p.datastore, floatdecoder, maxage)
 	if !isvalid {
 		return false
@@ -171,6 +173,10 @@ func (p *SigCurve) retrieveData(maxage time.Duration) (isvalid bool) {
 		return false
 	}
 	p.variancecurve, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variancecurve", p.datastore, floatdecoder, maxage)
+	if !isvalid {
+		return false
+	}
+	p.variancecurvedbg, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-variancecurvedbg", p.datastore, floatdecoder, maxage)
 	if !isvalid {
 		return false
 	}
@@ -245,14 +251,14 @@ func (p *SigCurve) Plot() {
 func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []interface{}) (alpha, beta, rsqrd float64) {
 	///data is our x
 	// for now, the index of the data is y - so generate y
-	firstsampletime := sampletime[0].(time.Time)
+	firstsampletime := time.Time(sampletime[0].(storables.StorableTime))
 	y := make([]float64, len(data))
 	x := make([]float64, len(data))
-	timerange := sampletime[len(sampletime)-1].(time.Time).Sub(sampletime[0].(time.Time))
+	timerange := time.Time(sampletime[len(sampletime)-1].(storables.StorableTime)).Sub(firstsampletime)
 	avgtime := float64(timerange) / float64(len(sampletime))
 	for i, _ := range data {
-		x[i] = float64(sampletime[i].(time.Time).Sub(firstsampletime)) / avgtime
-		y[i] = data[i].(float64)
+		x[i] = float64(time.Time(sampletime[i].(storables.StorableTime)).Sub(firstsampletime)) / avgtime
+		y[i] = float64(data[i].(storables.StorableFloat))
 	}
 	alpha, beta = stat.LinearRegression(x, y, nil, false)
 	rsqrd = stat.RSquared(x, y, nil, alpha, beta)
@@ -264,27 +270,27 @@ func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []in
 func (p *SigCurve) trend() (isvalid, upwards bool) {
 	/// provided we have more than
 	if p.variancecurve.Len() >= p.mindatapoints {
-		min := p.variancecurve.At(0).(float64)
-		max := p.variancecurve.At(0).(float64)
+		min := p.variancecurve.At(0).(storables.StorableFloat)
+		max := p.variancecurve.At(0).(storables.StorableFloat)
 		for _, f := range p.variancecurve.Items() {
-			if f.(float64) > max {
-				max = f.(float64)
+			if f.(storables.StorableFloat) > max {
+				max = f.(storables.StorableFloat)
 			}
-			if f.(float64) < min {
-				min = f.(float64)
+			if f.(storables.StorableFloat) < min {
+				min = f.(storables.StorableFloat)
 			}
 		}
-		angle := p.variancecurve.FromBack(0).(float64)
+		angle := p.variancecurve.FromBack(0).(storables.StorableFloat)
 		//// Scale the angle based on min and max angle
-		scaled := (angle - min) / (max - min)
-		p.statslopedata.Inc(scaled)
+		scaled := angle / ((max - min) / 2)
+		p.statslopedata.Inc(float64(scaled))
 		//see if the last item is a non-shallow upward curve
 		if scaled > 0 {
-			if scaled > p.minslope {
+			if float64(scaled) > p.minslope {
 				return true, true
 			}
 		} else if scaled < 0 {
-			if math.Abs(scaled) > p.minslope {
+			if math.Abs(float64(scaled)) > p.minslope {
 				return true, false
 			}
 		}
@@ -296,8 +302,8 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 
 func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 	p.storeData() /// this should only store data after a given duration
-	p.variance.PushAndResize(StorableFloat(variance * p.shiftfactor))
-	p.variancetime.PushAndResize(StorableTime(t))
+	p.variance.PushAndResize(storables.StorableFloat(variance * p.shiftfactor))
+	p.variancetime.PushAndResize(storables.StorableTime(t))
 	///Check the variance graph to see if we are on the way up
 	p.wndcounter++
 	if p.wndcounter > p.window {
@@ -310,7 +316,7 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 		_, grad, rsqrd := p.linearRegressionFromArray(p.variance.Items()[p.variance.Len()-(p.window):],
 			p.variancetime.Items()[p.variancetime.Len()-(p.window):])
 		if !math.IsNaN(rsqrd) {
-			p.rsqrd.PushAndResize(StorableFloat(rsqrd))
+			p.rsqrd.PushAndResize(storables.StorableFloat(rsqrd))
 		}
 		/// don't push dubious results
 		if rsqrd > p.minrsqrd {
@@ -318,8 +324,8 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 				log.Panicln("Grad is NaN ", grad)
 			}
 			//fmt.Println("adding LR data ", grad)
-			p.variancecurve.PushAndResize(StorableFloat(grad))
-			p.variancecurvedbg.PushAndResize(StorableFloat(grad))
+			p.variancecurve.PushAndResize(storables.StorableFloat(grad))
+			p.variancecurvedbg.PushAndResize(storables.StorableFloat(grad))
 		}
 		p.wndcounter = 0
 	} else {

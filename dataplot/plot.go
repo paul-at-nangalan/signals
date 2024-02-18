@@ -3,6 +3,7 @@ package dataplot
 import (
 	"fmt"
 	"github.com/paul-at-nangalan/signals/managedslice"
+	"github.com/paul-at-nangalan/signals/signals/storables"
 	"log"
 	"math"
 )
@@ -10,7 +11,7 @@ import (
 func PlotManagedSlice(data *managedslice.Slice, vx, vy int) {
 	datapoints := make([]float64, data.Len())
 	for i := 0; i < len(datapoints); i++ {
-		datapoints[i] = data.At(i).(float64)
+		datapoints[i] = float64(data.At(i).(storables.StorableFloat))
 	}
 	Plot(datapoints, vx, vy)
 }

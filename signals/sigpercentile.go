@@ -7,6 +7,7 @@ import (
 	"github.com/paul-at-nangalan/errorhandler/handlers"
 	"github.com/paul-at-nangalan/signals/dataplot"
 	"github.com/paul-at-nangalan/signals/managedslice"
+	"github.com/paul-at-nangalan/signals/signals/storables"
 	"github.com/paul-at-nangalan/signals/store"
 	"gonum.org/v1/gonum/stat"
 	"io"
@@ -179,6 +180,8 @@ func (p *SigPercentile) Decode(buffer io.Reader) {
 	handlers.PanicOnError(err)
 	err = enc.Decode(&p.targetnumbins)
 	handlers.PanicOnError(err)
+	err = enc.Decode(&p.pruneabove)
+	handlers.PanicOnError(err)
 	err = enc.Decode(&p.targetage)
 	handlers.PanicOnError(err)
 
@@ -186,7 +189,9 @@ func (p *SigPercentile) Decode(buffer io.Reader) {
 	err = enc.Decode(&lenbins)
 	handlers.PanicOnError(err)
 	p.bins = make([]*Bin, lenbins)
+	fmt.Println("Num bins ", lenbins)
 	for i := range p.bins {
+		p.bins[i] = &Bin{}
 		p.bins[i].decode(enc)
 	}
 }
@@ -201,7 +206,7 @@ func (p *SigPercentile) storeData() {
 }
 
 func (p *SigPercentile) retrieveData(maxage time.Duration) (isvalid bool) {
-	floatdecoder := StorableFloat(0)
+	floatdecoder := storables.StorableFloat(0)
 	//timedecoder := StorableTime{}
 	p.lastdata, isvalid = managedslice.NewManagedSliceFromStore(p.storagename+"-lastdata", p.datastore, floatdecoder, maxage)
 	if !isvalid {
@@ -354,7 +359,7 @@ func (p *SigPercentile) AddData(val float64) {
 		log.Println("WARNING NaN passed to SigPercentile: AddData")
 		return
 	}
-	p.lastdata.PushAndResize(StorableFloat(val))
+	p.lastdata.PushAndResize(storables.StorableFloat(val))
 	if p.lastdata.Len() < p.mindata {
 		p.SetRange(val)
 		return
@@ -370,11 +375,11 @@ func (p *SigPercentile) AddData(val float64) {
 			p.bins[i] = NewBin(p.lower, interval, float64(i))
 		}
 		for _, val := range p.lastdata.Items() {
-			predictedindex, outofbounds := p.predictIndex(val.(float64))
+			predictedindex, outofbounds := p.predictIndex(float64(val.(storables.StorableFloat)))
 			if outofbounds != 0 {
 				log.Panic("oob is still non zero, ", val, outofbounds, p.lower, p.upper, len(p.bins))
 			}
-			if !p.tryAddFromIndx(val.(float64), predictedindex) {
+			if !p.tryAddFromIndx(float64(val.(storables.StorableFloat)), predictedindex) {
 				log.Panic("failed to add value from last data ", val, predictedindex, p.lower, p.upper)
 			}
 		}
