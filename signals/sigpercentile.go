@@ -159,6 +159,16 @@ func (p *SigPercentile) Encode(buffer io.Writer) {
 	err = enc.Encode(p.targetage)
 	handlers.PanicOnError(err)
 
+	/// Upper and lower should also be retrieved
+	err = enc.Encode(p.upper)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.lower)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.issetupper)
+	handlers.PanicOnError(err)
+	err = enc.Encode(p.issetlower)
+	handlers.PanicOnError(err)
+
 	////Encode the bins
 	lenbins := len(p.bins)
 	err = enc.Encode(lenbins)
@@ -185,6 +195,16 @@ func (p *SigPercentile) Decode(buffer io.Reader) {
 	err = enc.Decode(&p.targetage)
 	handlers.PanicOnError(err)
 
+	/// Upper and lower should also be retrieved
+	err = enc.Decode(&p.upper)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.lower)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.issetupper)
+	handlers.PanicOnError(err)
+	err = enc.Decode(&p.issetlower)
+	handlers.PanicOnError(err)
+
 	lenbins := 0
 	err = enc.Decode(&lenbins)
 	handlers.PanicOnError(err)
@@ -200,6 +220,7 @@ func (p *SigPercentile) storeData() {
 	if p.datastore == nil || p.lastsaved.Add(p.saveduration).After(time.Now()) {
 		return
 	}
+	p.lastsaved = time.Now()
 	p.datastore.Store(p.storagename+"-lastdata", p.lastdata)
 
 	p.datastore.Store(p.storagename, p)
@@ -267,6 +288,9 @@ func (p *SigPercentile) addBucket(val float64) {
 		log.Panic("val within range")
 	}
 	r := p.upper - p.lower
+	if r == 0 {
+		log.Panic("Upper and lower are equal ", p.upper, p.lower, val)
+	}
 	interval := r / float64(len(p.bins))
 	diff := p.lower - val /// assume val < lower
 	if val > p.upper {
@@ -389,7 +413,7 @@ func (p *SigPercentile) AddData(val float64) {
 	///// Add the value - extending bins if needed
 	predictedindex, outofbounds := p.predictIndex(val)
 	if outofbounds != 0 {
-		//fmt.Println("Add new bucket for ", val)
+		fmt.Println("Add new bucket for ", val)
 		/// add buckets and prune
 		p.addBucket(val)
 		predictedindex, outofbounds = p.predictIndex(val)

@@ -78,6 +78,9 @@ func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, 
 	if window >= numsamples-mindatapoints {
 		log.Panic("The window should be much smaller than the difference between the number of samples and the mindatapoints")
 	}
+	if shiftfactor == 0 {
+		shiftfactor = 1
+	}
 
 	sc := &SigCurve{
 		variance:             managedslice.NewManagedSlice(0, numsamples),            ///we only need 2 * window here - but keep the rest for now for debug
@@ -153,6 +156,7 @@ func (p *SigCurve) storeData() {
 	if p.datastore == nil || p.lastsaved.Add(p.saveduration).After(time.Now()) {
 		return
 	}
+	p.lastsaved = time.Now()
 	p.datastore.Store(p.storagename+"-variance", p.variance)
 	p.datastore.Store(p.storagename+"-variancetime", p.variancetime)
 	p.datastore.Store(p.storagename+"-variancecurve", p.variancecurve)
@@ -283,6 +287,7 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 		angle := p.variancecurve.FromBack(0).(storables.StorableFloat)
 		//// Scale the angle based on min and max angle
 		scaled := angle / ((max - min) / 2)
+		fmt.Println("Adding scaled slope stats ", scaled)
 		p.statslopedata.Inc(float64(scaled))
 		//see if the last item is a non-shallow upward curve
 		if scaled > 0 {
@@ -301,6 +306,7 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 }
 
 func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
+	//fmt.Println("Adding variance sample ", variance)
 	p.storeData() /// this should only store data after a given duration
 	p.variance.PushAndResize(storables.StorableFloat(variance * p.shiftfactor))
 	p.variancetime.PushAndResize(storables.StorableTime(t))
