@@ -56,7 +56,7 @@ func (p *FileStore) run() {
 			path := filepath.Join(p.filename, blob.name)
 			f, err := os.Create(path)
 			handlers.PanicOnError(err)
-			fmt.Println("Writing out ", len(blob.buff.Bytes()), " for ", blob.name)
+			//fmt.Println("Writing out ", len(blob.buff.Bytes()), " for ", blob.name)
 			_, err = f.Write(blob.buff.Bytes())
 			handlers.PanicOnError(err)
 			f.Close()

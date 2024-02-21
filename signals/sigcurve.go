@@ -78,10 +78,16 @@ func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, 
 	if window >= numsamples-mindatapoints {
 		log.Panic("The window should be much smaller than the difference between the number of samples and the mindatapoints")
 	}
+	if (mindatapoints/window)+1 > (numsamples/window)+1 {
+		log.Panicln("Min data points is less than max variance curve length - impossible to generate signals",
+			mindatapoints, "/", window+1, " = ", (mindatapoints/window)+1,
+			" and ", numsamples, "/", window+1, "=", (numsamples/window)+1)
+	}
 	if shiftfactor == 0 {
 		shiftfactor = 1
 	}
-
+	slopestatsrange := minslope * 2
+	slopestatsstep := minslope / 100
 	sc := &SigCurve{
 		variance:             managedslice.NewManagedSlice(0, numsamples),            ///we only need 2 * window here - but keep the rest for now for debug
 		variancetime:         managedslice.NewManagedSlice(0, numsamples),            ///do LR against time on the x axis
@@ -98,7 +104,7 @@ func NewSigCurveWithFactor(numsamples int, mindatapoints int, minslope float64, 
 		wndcounter:           0,
 		averagewndsize:       ((numsamples - mindatapoints) / window) + 1,
 		minrsqrd:             minrsqrd,
-		statslopedata:        perfstats.NewBucketCounter(-100, 100, 4, "slope-stats"),
+		statslopedata:        perfstats.NewBucketCounter(-1*slopestatsrange, slopestatsrange, slopestatsstep, "slope-stats"),
 		statrsqrddata:        perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
 		statsvaliddata:       perfstats.NewCounter("valid-data-sample"),
 	}
@@ -213,14 +219,18 @@ func LoadFromStorage(storename string, fs store.Store, maxage time.Duration) (si
 		statsvariancebuysig:  perfstats.NewCounter("variance-buy-signalled"),
 		statsvariancesellsig: perfstats.NewCounter("variance-sell-signalled"),
 		wndcounter:           0,
-		statslopedata:        perfstats.NewBucketCounter(-100, 100, 4, "slope-stats"),
-		statrsqrddata:        perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
-		statsvaliddata:       perfstats.NewCounter("valid-data-sample"),
+		//statslopedata:        perfstats.NewBucketCounter(-2, 2, 0.01, "slope-stats"),
+		statrsqrddata:  perfstats.NewBucketCounter(-1, 1, 0.05, "rsqrd-stats"),
+		statsvaliddata: perfstats.NewCounter("valid-data-sample"),
 	}
 	isvalid = sigcurve.retrieveData(maxage)
 	if !isvalid {
 		return nil, false /// let it know the load failed - it maybe considered an error condition
 	}
+	slopestatsrange := sigcurve.minslope * 2
+	slopestatsstep := sigcurve.minslope / 100
+	sigcurve.statslopedata = perfstats.NewBucketCounter(-1*slopestatsrange, slopestatsrange, slopestatsstep, "slope-stats")
+
 	return sigcurve, true
 }
 
@@ -230,7 +240,9 @@ func (p *SigCurve) LogLevel(level int) {
 
 func (p *SigCurve) logdbg(data ...interface{}) {
 	if p.loglevel >= LOGDBG {
-		fmt.Println(data...)
+		fmt.Print("****************")
+		fmt.Print(data...)
+		fmt.Println("****************")
 	}
 }
 
@@ -253,6 +265,7 @@ func (p *SigCurve) Plot() {
 }
 
 func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []interface{}) (alpha, beta, rsqrd float64) {
+	minprice, maxprice := p.getPriceRangeOverAllData()
 	///data is our x
 	// for now, the index of the data is y - so generate y
 	firstsampletime := time.Time(sampletime[0].(storables.StorableTime))
@@ -262,40 +275,31 @@ func (p *SigCurve) linearRegressionFromArray(data []interface{}, sampletime []in
 	avgtime := float64(timerange) / float64(len(sampletime))
 	for i, _ := range data {
 		x[i] = float64(time.Time(sampletime[i].(storables.StorableTime)).Sub(firstsampletime)) / avgtime
-		y[i] = float64(data[i].(storables.StorableFloat))
+		y[i] = (float64(data[i].(storables.StorableFloat)) - minprice) / (maxprice - minprice)
 	}
 	alpha, beta = stat.LinearRegression(x, y, nil, false)
 	rsqrd = stat.RSquared(x, y, nil, alpha, beta)
-	//p.logdbg("regression ", beta, rsqrd)
+	p.logdbg("regression ", beta, rsqrd)
 	p.statrsqrddata.Inc(rsqrd)
+	p.statslopedata.Inc(beta)
 	return alpha, beta, rsqrd
 }
 
 func (p *SigCurve) trend() (isvalid, upwards bool) {
 	/// provided we have more than
+	p.logdbg("Variance curve len ", p.variancecurve.Len(), " min data points ", p.mindatapoints)
 	if p.variancecurve.Len() >= p.mindatapoints {
-		min := p.variancecurve.At(0).(storables.StorableFloat)
-		max := p.variancecurve.At(0).(storables.StorableFloat)
-		for _, f := range p.variancecurve.Items() {
-			if f.(storables.StorableFloat) > max {
-				max = f.(storables.StorableFloat)
-			}
-			if f.(storables.StorableFloat) < min {
-				min = f.(storables.StorableFloat)
-			}
-		}
-		angle := p.variancecurve.FromBack(0).(storables.StorableFloat)
-		//// Scale the angle based on min and max angle
-		scaled := angle / ((max - min) / 2)
-		fmt.Println("Adding scaled slope stats ", scaled)
-		p.statslopedata.Inc(float64(scaled))
+
+		angle := float64(p.variancecurve.FromBack(0).(storables.StorableFloat))
+
 		//see if the last item is a non-shallow upward curve
-		if scaled > 0 {
-			if float64(scaled) > p.minslope {
+		p.logdbg("Curve angle is ", angle)
+		if angle > 0 {
+			if angle > p.minslope {
 				return true, true
 			}
-		} else if scaled < 0 {
-			if math.Abs(float64(scaled)) > p.minslope {
+		} else if angle < 0 {
+			if math.Abs(angle) > p.minslope {
 				return true, false
 			}
 		}
@@ -303,6 +307,20 @@ func (p *SigCurve) trend() (isvalid, upwards bool) {
 		fmt.Println("Not enough data points ", p.variancecurve.Len(), p.mindatapoints)
 	}
 	return false, false
+}
+
+func (p *SigCurve) getPriceRangeOverAllData() (minprice, maxprice float64) {
+	min := p.variance.At(0).(storables.StorableFloat)
+	max := p.variance.At(0).(storables.StorableFloat)
+	for _, val := range p.variance.Items() {
+		if val.(storables.StorableFloat) < min {
+			min = val.(storables.StorableFloat)
+		}
+		if val.(storables.StorableFloat) > max {
+			max = val.(storables.StorableFloat)
+		}
+	}
+	return float64(min), float64(max)
 }
 
 func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
@@ -317,7 +335,7 @@ func (p *SigCurve) AddVarianceSample(variance float64, t time.Time) {
 	}
 	///I need at least 2 windows to start
 	// thereafter, create a record every new window
-	if p.variance.Len() >= p.window && (p.wndcounter%p.window) == 0 {
+	if p.variance.Len() >= p.window { // calc it every time  && (p.wndcounter%p.window) == 0 {
 		//p.logdbg("getting LR data")
 		_, grad, rsqrd := p.linearRegressionFromArray(p.variance.Items()[p.variance.Len()-(p.window):],
 			p.variancetime.Items()[p.variancetime.Len()-(p.window):])

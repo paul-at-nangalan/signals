@@ -64,7 +64,7 @@ func (p *Bin) MidValue() float64 {
 }
 
 func (p *Bin) Add(val float64) {
-	if val > p.upperval || val < p.lowerval {
+	if val > (p.upperval+FP_TOLERANCE) || val < (p.lowerval-FP_TOLERANCE) {
 		log.Panic("Adding val to bin outside range ", val, p)
 	}
 	p.lastupdate = time.Now()
