@@ -9,6 +9,7 @@ import (
 	"github.com/paul-at-nangalan/signals/managedslice"
 	"github.com/paul-at-nangalan/signals/signals/storables"
 	"github.com/paul-at-nangalan/signals/store"
+	perfstats "github.com/paul-at-nangalan/stats/stats"
 	"gonum.org/v1/gonum/stat"
 	"io"
 	"log"
@@ -96,6 +97,8 @@ type SigPercentile struct {
 	targetnumbins          int
 	pruneabove             int
 	lastdata               *managedslice.Slice
+	lastpercentile         *managedslice.Slice //// THIS IS FOR STATS PURPOSES (not stored)
+	percentiles            *perfstats.BucketCounter
 	targetage              time.Duration
 
 	sigbuy  bool
@@ -124,8 +127,10 @@ func NewSigPercentile(buybelow, sellabove float64, mindata int, targetage time.D
 		targetnumbins: 1000,
 		pruneabove:    2000,
 
-		lastdata:  managedslice.NewManagedSlice(0, 2*mindata),
-		targetage: targetage,
+		lastdata:       managedslice.NewManagedSlice(0, 2*mindata),
+		lastpercentile: managedslice.NewManagedSlice(0, 2*mindata),
+		percentiles:    perfstats.NewBucketCounter(0, 1, 0.05, "percentiles"),
+		targetage:      targetage,
 	}
 }
 
@@ -135,12 +140,20 @@ func LoadFromStorageSigPC(storename string, fs store.Store, maxage time.Duration
 	sigpc = &SigPercentile{ /// create an empty one and try to load data into it
 		storagename: storename,
 		datastore:   fs,
+		percentiles: perfstats.NewBucketCounter(0, 1, 0.05, "percentiles"),
 	}
 	isvalid = sigpc.retrieveData(maxage)
 	if !isvalid {
 		return nil, false /// let it know the load failed - it maybe considered an error condition
 	}
+
+	sigpc.lastpercentile = managedslice.NewManagedSlice(0, 2*sigpc.mindata)
+
 	return sigpc, true
+}
+
+func (p *SigPercentile) GetStatsCounters() []perfstats.Stat {
+	return []perfstats.Stat{p.percentiles}
 }
 
 func (p *SigPercentile) Encode(buffer io.Writer) {
@@ -246,11 +259,14 @@ func (p *SigPercentile) SetupStorage(storename string, fs store.Store, howoftent
 }
 
 func (p *SigPercentile) Plot() {
+	fmt.Println("Bins")
 	bins := make([]float64, len(p.bins))
 	for i, bin := range p.bins {
 		bins[i] = bin.Count()
 	}
 	dataplot.Plot(bins, 40, 40)
+	fmt.Println("Last percentile")
+	dataplot.PlotManagedSlice(p.lastpercentile, 40, 40)
 }
 
 func (p *SigPercentile) SetRange(val float64) {
@@ -442,6 +458,8 @@ func (p *SigPercentile) checkData(val float64) float64 {
 		weights[i] = bin.Count()
 	}
 	place := stat.CDF(val, stat.Empirical, vals, weights)
+	p.lastpercentile.PushAndResize(storables.StorableFloat(place))
+	p.percentiles.Inc(place)
 	sigsell := false
 	sigbuy := false
 	if place > p.sellabove {
