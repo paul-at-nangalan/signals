@@ -1,7 +1,7 @@
 package signals
 
 import (
-	"github.com/paul-at-nangalan/signals/store"
+	"github.com/paul-at-nangalan/short-term-store/store"
 	"gonum.org/v1/gonum/stat/distuv"
 	"gotest.tools/v3/assert"
 	"testing"

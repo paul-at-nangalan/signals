@@ -4,7 +4,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"github.com/paul-at-nangalan/errorhandler/handlers"
-	"github.com/paul-at-nangalan/signals/store"
+	"github.com/paul-at-nangalan/short-term-store/store"
 	"io"
 	"log"
 	"time"

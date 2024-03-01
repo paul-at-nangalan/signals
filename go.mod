@@ -11,5 +11,6 @@ require (
 
 require (
 	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/paul-at-nangalan/short-term-store v0.0.0-20240301041402-7181f5c6b4fb // indirect
 	golang.org/x/exp v0.0.0-20230321023759-10a507213a29 // indirect
 )

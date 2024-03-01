@@ -2,7 +2,7 @@ package signals
 
 import (
 	"fmt"
-	"github.com/paul-at-nangalan/signals/store"
+	"github.com/paul-at-nangalan/short-term-store/store"
 	"gotest.tools/v3/assert"
 	"math"
 	"math/rand"
